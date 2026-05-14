@@ -6,6 +6,7 @@ mod diff;
 mod loader;
 mod mapper;
 mod parser;
+mod report;
 mod spec;
 
 #[derive(Parser, Debug)]
@@ -44,33 +45,14 @@ fn main() -> Result<()> {
 
     // Run comparison
     println!("\n🔬 Analyzing changes...");
-    let report = diff::compare(&old_spec, &new_spec);
+    let diff_report = diff::compare(&old_spec, &new_spec);
 
-    // Display findings
-    if report.findings.is_empty() {
-        println!("\n✅ No breaking changes detected. Upgrade looks safe!");
-    } else {
-        println!();
-        for finding in &report.findings {
-            let icon = match finding.severity {
-                diff::Severity::Critical => "🔴 CRITICAL",
-                diff::Severity::Warning => "🟡 WARNING ",
-                diff::Severity::Info => "🔵 INFO    ",
-            };
-            println!("  {} [{}] {}", icon, finding.category, finding.message);
-        }
+    // Generate Safety Report
+    let safety_report = report::SafetyReport::new(&diff_report);
+    println!("{}", safety_report.generate_summary_text());
 
-        println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        println!(
-            "  Summary: {} critical, {} warnings, {} info",
-            report.critical_count(),
-            report.warning_count(),
-            report.info_count()
-        );
-
-        if report.critical_count() > 0 {
-            println!("\n❌ Upgrade has CRITICAL issues. Review before deploying!");
-        }
+    if !safety_report.is_safe {
+        std::process::exit(1);
     }
 
     Ok(())
