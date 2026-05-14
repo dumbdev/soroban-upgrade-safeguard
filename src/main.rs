@@ -3,6 +3,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 mod loader;
+mod parser;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -22,17 +23,32 @@ fn main() -> Result<()> {
     println!("🔍 Soroban Upgrade Safeguard");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    println!("\n📦 Loading contracts...");
+    println!("\n📦 Loading and Parsing contracts...");
 
+    // Old WASM
     let old = loader::load_wasm(&args.old_wasm)?;
-    println!("  ✅ Old: {} ({} bytes)", old.path, old.bytes.len());
+    let old_meta = parser::extract_metadata(&old.bytes)?;
+    println!(
+        "  ✅ Old: {} ({} bytes, {} spec entries)",
+        old.path,
+        old.bytes.len(),
+        old_meta.spec.len()
+    );
 
+    // New WASM
     let new = loader::load_wasm(&args.new_wasm)?;
-    println!("  ✅ New: {} ({} bytes)", new.path, new.bytes.len());
+    let new_meta = parser::extract_metadata(&new.bytes)?;
+    println!(
+        "  ✅ New: {} ({} bytes, {} spec entries)",
+        new.path,
+        new.bytes.len(),
+        new_meta.spec.len()
+    );
 
-    println!("\n✅ Both WASM modules loaded and validated successfully.");
-    println!("   Analysis coming in subsequent milestones.");
+    println!("\n✅ Metadata extracted successfully.");
+    println!("   Next: Decoding XDR spec entries...");
 
     Ok(())
 }
+
 
