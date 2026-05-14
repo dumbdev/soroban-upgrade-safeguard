@@ -1,6 +1,7 @@
 use crate::spec::ContractSpec;
 use stellar_xdr::curr::{
-    ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeDef, ScSpecUdtStructFieldV0, ScSpecUdtStructV0,
+    ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeDef, ScSpecUdtEnumCaseV0, ScSpecUdtEnumV0,
+    ScSpecUdtStructFieldV0, ScSpecUdtStructV0,
 };
 
 /// Severity of a detected issue.
@@ -45,6 +46,7 @@ pub fn compare(old: &ContractSpec, new: &ContractSpec) -> DiffReport {
 
     compare_functions(old, new, &mut report);
     compare_structs(old, new, &mut report);
+    compare_enums(old, new, &mut report);
 
     report
 }
@@ -277,6 +279,99 @@ fn check_struct_fields(
                     new_field.name.to_string()
                 ),
             });
+        }
+    }
+}
+
+/// Compare enum definitions between old and new contract specs.
+fn compare_enums(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport) {
+    for (name, old_enum) in &old.enums {
+        match new.enums.get(name) {
+            None => {
+                report.findings.push(Finding {
+                    severity: Severity::Critical,
+                    category: "Enum Removed".to_string(),
+                    message: format!(
+                        "Enum '{}' was removed. Data using this type will be invalid.",
+                        name
+                    ),
+                });
+            }
+            Some(new_enum) => {
+                check_enum_cases(name, old_enum, new_enum, report);
+            }
+        }
+    }
+
+    // Check for newly added enums
+    for name in new.enums.keys() {
+        if !old.enums.contains_key(name) {
+            report.findings.push(Finding {
+                severity: Severity::Info,
+                category: "Enum Added".to_string(),
+                message: format!("New enum '{}' added.", name),
+            });
+        }
+    }
+}
+
+/// Compare cases of two enums with the same name.
+fn check_enum_cases(
+    name: &str,
+    old_enum: &ScSpecUdtEnumV0,
+    new_enum: &ScSpecUdtEnumV0,
+    report: &mut DiffReport,
+) {
+    let old_cases: &[ScSpecUdtEnumCaseV0] = old_enum.cases.as_ref();
+    let new_cases: &[ScSpecUdtEnumCaseV0] = new_enum.cases.as_ref();
+
+    for old_case in old_cases {
+        let old_name = old_case.name.to_string();
+        
+        match new_cases.iter().find(|c| c.name.to_string() == old_name) {
+            None => {
+                // The case was removed entirely
+                report.findings.push(Finding {
+                    severity: Severity::Critical,
+                    category: "Enum Case Removed".to_string(),
+                    message: format!(
+                        "Enum '{}': case '{}' (value: {}) was removed. \
+                         On-chain data with this value will be orphaned/invalid.",
+                        name, old_name, old_case.value
+                    ),
+                });
+            }
+            Some(new_case) => {
+                // The case exists, but did its integer value change?
+                if old_case.value != new_case.value {
+                    report.findings.push(Finding {
+                        severity: Severity::Critical,
+                        category: "Enum Case Value Changed".to_string(),
+                        message: format!(
+                            "Enum '{}': case '{}' value changed from {} to {}. \
+                             This breaks data serialization.",
+                            name, old_name, old_case.value, new_case.value
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    // Check for new enum cases (usually safe, but good to know)
+    if new_cases.len() > old_cases.len() {
+        for new_case in new_cases {
+            let new_name = new_case.name.to_string();
+            if !old_cases.iter().any(|c| c.name.to_string() == new_name) {
+                report.findings.push(Finding {
+                    severity: Severity::Info,
+                    category: "Enum Case Added".to_string(),
+                    message: format!(
+                        "Enum '{}': new case '{}' (value {}) added.",
+                        name, new_name, new_case.value
+                    ),
+                });
+            }
         }
     }
 }
