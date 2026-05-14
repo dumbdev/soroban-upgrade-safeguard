@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 mod diff;
 mod loader;
+mod mapper;
 mod parser;
 mod spec;
 

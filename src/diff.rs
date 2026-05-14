@@ -130,8 +130,10 @@ fn check_function_signature(
                 severity: Severity::Critical,
                 category: "Parameter Type Changed".to_string(),
                 message: format!(
-                    "Function '{}': parameter {} ('{}') type changed from {:?} to {:?}.",
-                    name, i, old_name, old_input.type_, new_input.type_
+                    "Function '{}': parameter {} ('{}') type changed from `{}` to `{}`.",
+                    name, i, old_name, 
+                    crate::mapper::type_to_string(&old_input.type_), 
+                    crate::mapper::type_to_string(&new_input.type_)
                 ),
             });
         }
@@ -159,8 +161,10 @@ fn check_function_signature(
                     severity: Severity::Critical,
                     category: "Return Type Changed".to_string(),
                     message: format!(
-                        "Function '{}': return type {} changed from {:?} to {:?}.",
-                        name, i, old_out, new_out
+                        "Function '{}': return type {} changed from `{}` to `{}`.",
+                        name, i, 
+                        crate::mapper::type_to_string(old_out), 
+                        crate::mapper::type_to_string(new_out)
                     ),
                 });
             }
@@ -259,8 +263,10 @@ fn check_struct_fields(
                 severity: Severity::Critical,
                 category: "Struct Field Type Changed".to_string(),
                 message: format!(
-                    "Struct '{}': field '{}' (position {}) type changed from {:?} to {:?}.",
-                    name, old_name, i, old_field.type_, new_field.type_
+                    "Struct '{}': field '{}' (position {}) type changed from `{}` to `{}`.",
+                    name, old_name, i, 
+                    crate::mapper::type_to_string(&old_field.type_), 
+                    crate::mapper::type_to_string(&new_field.type_)
                 ),
             });
         }
