@@ -118,7 +118,7 @@ Most new rules belong in `diff.rs`. The general shape is:
 1. Decide the category name and the severity. Critical means the change will break a deployed contract or its integrations. Warning means it may require a migration or affect external systems. Info means it is additive and safe.
 2. Add the comparison logic inside the relevant function, such as `compare_functions`, `compare_structs`, or `compare_enums`, or add a new comparison function and call it from `compare`.
 3. Push a `Finding` with a clear message when the condition is met.
-4. If your rule concerns a user-defined type whose change could cascade to types that embed it, make sure the type name appears in the finding message in single quotes, since the cascade detector reads type names from those messages.
+4. If your rule concerns a user-defined type whose change could cascade to types that embed it, set the `type_name` field on the `Finding` to `Some(name)` so the cascade detector can identify affected types from structured data.
 5. Add tests and, if helpful, a fixture pair.
 
 When in doubt about whether something should be critical or a warning, lean toward the stricter level only when the change genuinely corrupts stored data or breaks callers. Overusing critical erodes trust in the report.

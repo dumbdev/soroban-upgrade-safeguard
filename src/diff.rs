@@ -21,6 +21,10 @@ pub struct Finding {
     pub severity: Severity,
     pub category: String,
     pub message: String,
+    /// The name of the affected UDT (struct/enum/union), if this finding
+    /// relates to a specific type.  Used by cascade-detection so it never
+    /// needs to re-parse `message`.
+    pub type_name: Option<String>,
 }
 
 /// Holds all findings from a comparison of two contract specs.
@@ -74,6 +78,7 @@ fn compare_functions(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRe
                         "Function '{}' was removed. Existing callers will break.",
                         name
                     ),
+                    type_name: None,
                 });
             }
             Some(new_fn) => {
@@ -89,6 +94,7 @@ fn compare_functions(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRe
                 severity: Severity::Info,
                 category: "Function Added".to_string(),
                 message: format!("New function '{}' added.", name),
+                type_name: None,
             });
         }
     }
@@ -115,6 +121,7 @@ fn check_function_signature(
                 old_inputs.len(),
                 new_inputs.len()
             ),
+            type_name: None,
         });
         return; // No point comparing individual params if count differs
     }
@@ -132,6 +139,7 @@ fn check_function_signature(
                     "Function '{}': parameter {} renamed from '{}' to '{}'.",
                     name, i, old_name, new_name
                 ),
+                type_name: None,
             });
         }
 
@@ -145,6 +153,7 @@ fn check_function_signature(
                     crate::mapper::type_to_string(&old_input.type_), 
                     crate::mapper::type_to_string(&new_input.type_)
                 ),
+                type_name: None,
             });
         }
     }
@@ -163,6 +172,7 @@ fn check_function_signature(
                 old_outputs.len(),
                 new_outputs.len()
             ),
+            type_name: None,
         });
     } else {
         for (i, (old_out, new_out)) in old_outputs.iter().zip(new_outputs.iter()).enumerate() {
@@ -176,6 +186,7 @@ fn check_function_signature(
                         crate::mapper::type_to_string(old_out), 
                         crate::mapper::type_to_string(new_out)
                     ),
+                    type_name: None,
                 });
             }
         }
@@ -202,6 +213,7 @@ fn compare_structs(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRepo
                         if is_evt { "Event struct" } else { "Struct" },
                         name
                     ),
+                    type_name: Some(name.clone()),
                 });
             }
             Some(new_struct) => {
@@ -217,6 +229,7 @@ fn compare_structs(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRepo
                 severity: Severity::Info,
                 category: "Struct Added".to_string(),
                 message: format!("New struct '{}' added.", name),
+                type_name: Some(name.clone()),
             });
         }
     }
@@ -250,6 +263,7 @@ fn check_struct_fields(
                     "{} '{}': field '{}' was removed. Backwards compatibility is broken.",
                     msg_prefix, name, old_name
                 ),
+                type_name: Some(name.to_string()),
             });
         }
     }
@@ -269,6 +283,7 @@ fn check_struct_fields(
                      Positional serialization breaks layout compatibility.",
                     msg_prefix, name, i, old_name, new_name
                 ),
+                type_name: Some(name.to_string()),
             });
         }
 
@@ -283,6 +298,7 @@ fn check_struct_fields(
                     crate::mapper::type_to_string(&old_field.type_), 
                     crate::mapper::type_to_string(&new_field.type_)
                 ),
+                type_name: Some(name.to_string()),
             });
         }
     }
@@ -299,6 +315,7 @@ fn check_struct_fields(
                     name,
                     new_field.name.to_string()
                 ),
+                type_name: Some(name.to_string()),
             });
         }
     }
@@ -318,6 +335,7 @@ fn compare_enums(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport
                         if is_evt { "Event enum" } else { "Enum" },
                         name
                     ),
+                    type_name: Some(name.clone()),
                 });
             }
             Some(new_enum) => {
@@ -333,6 +351,7 @@ fn compare_enums(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport
                 severity: Severity::Info,
                 category: "Enum Added".to_string(),
                 message: format!("New enum '{}' added.", name),
+                type_name: Some(name.clone()),
             });
         }
     }
@@ -365,6 +384,7 @@ fn check_enum_cases(
                          On-chain data or events relying on this value will be invalid.",
                         msg_prefix, name, old_name, old_case.value
                     ),
+                    type_name: Some(name.to_string()),
                 });
             }
             Some(new_case) => {
@@ -378,6 +398,7 @@ fn check_enum_cases(
                              This breaks data serialization.",
                             msg_prefix, name, old_name, old_case.value, new_case.value
                         ),
+                        type_name: Some(name.to_string()),
                     });
                 }
             }
@@ -396,6 +417,7 @@ fn check_enum_cases(
                         "{} '{}': new case '{}' (value {}) added.",
                         msg_prefix, name, new_name, new_case.value
                     ),
+                    type_name: Some(name.to_string()),
                 });
             }
         }
@@ -407,14 +429,13 @@ fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
     let old_mapper = LayoutMapper::new(old);
     let reverse_deps = old_mapper.build_reverse_dependencies();
     
-    // Collect all UDTs that had a critical breaking change
+    // Collect all UDTs that had a critical breaking change.
+    // We read `type_name` directly — no message-text parsing needed.
     let mut broken_types = std::collections::HashSet::new();
     for finding in &report.findings {
         if finding.severity == Severity::Critical {
-            let tokens: Vec<&str> = finding.message.split('\'').collect();
-            if tokens.len() >= 3 && (finding.message.starts_with("Struct") || finding.message.starts_with("Enum") || finding.message.starts_with("Event")) {
-                let type_name = tokens[1].to_string();
-                broken_types.insert(type_name);
+            if let Some(ref name) = finding.type_name {
+                broken_types.insert(name.clone());
             }
         }
     }
@@ -443,9 +464,204 @@ fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
                              This breaks backwards compatibility for storage.",
                             dep, current_broken_type
                         ),
+                        type_name: Some(dep.clone()),
                     });
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stellar_xdr::curr::{ScSpecTypeUdt, StringM, VecM};
+
+    /// Helper: build a minimal ContractSpec with the given structs.
+    fn spec_with_structs(structs: Vec<(&str, Vec<(&str, ScSpecTypeDef)>)>) -> ContractSpec {
+        let mut spec = ContractSpec::default();
+        for (name, fields) in structs {
+            let xdr_fields: Vec<ScSpecUdtStructFieldV0> = fields
+                .into_iter()
+                .map(|(fname, ftype)| ScSpecUdtStructFieldV0 {
+                    doc: StringM::default(),
+                    name: fname.try_into().unwrap(),
+                    type_: ftype,
+                })
+                .collect();
+            spec.structs.insert(
+                name.to_string(),
+                ScSpecUdtStructV0 {
+                    doc: StringM::default(),
+                    lib: StringM::default(),
+                    name: name.try_into().unwrap(),
+                    fields: VecM::try_from(xdr_fields).unwrap(),
+                },
+            );
+        }
+        spec
+    }
+
+    /// Helper: create a UDT type reference.
+    fn udt(name: &str) -> ScSpecTypeDef {
+        ScSpecTypeDef::Udt(ScSpecTypeUdt {
+            name: name.try_into().unwrap(),
+        })
+    }
+
+    // ---------------------------------------------------------------
+    // Test 1: cascade detection picks up broken types via type_name
+    // ---------------------------------------------------------------
+    #[test]
+    fn cascade_detects_break_via_type_name() {
+        // Old spec: Inner(value: u32), Outer(inner: Inner)
+        let old = spec_with_structs(vec![
+            ("Inner", vec![("value", ScSpecTypeDef::U32)]),
+            ("Outer", vec![("inner", udt("Inner"))]),
+        ]);
+        // New spec: Inner has its field type changed -> triggers Critical
+        let new = spec_with_structs(vec![
+            ("Inner", vec![("value", ScSpecTypeDef::U64)]),
+            ("Outer", vec![("inner", udt("Inner"))]),
+        ]);
+
+        let report = compare(&old, &new);
+
+        // Inner should have a direct Critical finding
+        let inner_critical = report.findings.iter().any(|f| {
+            f.severity == Severity::Critical
+                && f.type_name.as_deref() == Some("Inner")
+                && f.category != "Cascading Layout Break"
+        });
+        assert!(inner_critical, "Expected a direct critical finding for Inner");
+
+        // Outer should have a cascading break
+        let outer_cascade = report.findings.iter().any(|f| {
+            f.severity == Severity::Critical
+                && f.type_name.as_deref() == Some("Outer")
+                && f.category == "Cascading Layout Break"
+        });
+        assert!(outer_cascade, "Expected a cascading break for Outer");
+    }
+
+    // ---------------------------------------------------------------
+    // Test 2: changing a finding's message text does NOT affect cascade
+    // ---------------------------------------------------------------
+    #[test]
+    fn cascade_is_message_independent() {
+        // Old spec: Child(x: u32), Parent(child: Child)
+        let old = spec_with_structs(vec![
+            ("Child", vec![("x", ScSpecTypeDef::U32)]),
+            ("Parent", vec![("child", udt("Child"))]),
+        ]);
+
+        // Build a report with a manually crafted finding whose message
+        // is completely different from the production format, but whose
+        // type_name is set correctly.
+        let mut report = DiffReport::default();
+        report.findings.push(Finding {
+            severity: Severity::Critical,
+            category: "TOTALLY CUSTOM CATEGORY".to_string(),
+            message: "This message has no quotes and mentions no type prefix whatsoever.".to_string(),
+            type_name: Some("Child".to_string()),
+        });
+
+        // Run cascade detection against the old spec
+        detect_cascading_layout_breaks(&old, &mut report);
+
+        // Parent should still be detected as cascaded
+        let parent_cascade = report.findings.iter().any(|f| {
+            f.severity == Severity::Critical
+                && f.type_name.as_deref() == Some("Parent")
+                && f.category == "Cascading Layout Break"
+        });
+        assert!(
+            parent_cascade,
+            "Cascade should work regardless of message text"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 3: function-level findings (type_name: None) do NOT
+    //         trigger false cascades
+    // ---------------------------------------------------------------
+    #[test]
+    fn function_findings_do_not_cascade() {
+        let old = spec_with_structs(vec![
+            ("MyStruct", vec![("val", ScSpecTypeDef::U32)]),
+        ]);
+
+        let mut report = DiffReport::default();
+        // Simulate a function-level Critical finding with type_name: None
+        report.findings.push(Finding {
+            severity: Severity::Critical,
+            category: "Function Removed".to_string(),
+            message: "Function 'do_stuff' was removed.".to_string(),
+            type_name: None,
+        });
+
+        detect_cascading_layout_breaks(&old, &mut report);
+
+        // Should still be just the one finding -- no cascade
+        assert_eq!(
+            report.findings.len(),
+            1,
+            "Function findings should not trigger cascades"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 4: transitive cascades (A -> B -> C)
+    // ---------------------------------------------------------------
+    #[test]
+    fn transitive_cascade_propagates() {
+        // Leaf(x: u32), Mid(leaf: Leaf), Top(mid: Mid)
+        let old = spec_with_structs(vec![
+            ("Leaf", vec![("x", ScSpecTypeDef::U32)]),
+            ("Mid", vec![("leaf", udt("Leaf"))]),
+            ("Top", vec![("mid", udt("Mid"))]),
+        ]);
+        let new = spec_with_structs(vec![
+            ("Leaf", vec![("x", ScSpecTypeDef::U64)]), // break
+            ("Mid", vec![("leaf", udt("Leaf"))]),
+            ("Top", vec![("mid", udt("Mid"))]),
+        ]);
+
+        let report = compare(&old, &new);
+
+        let cascade_types: Vec<&str> = report
+            .findings
+            .iter()
+            .filter(|f| f.category == "Cascading Layout Break")
+            .filter_map(|f| f.type_name.as_deref())
+            .collect();
+
+        assert!(cascade_types.contains(&"Mid"), "Mid should cascade from Leaf");
+        assert!(cascade_types.contains(&"Top"), "Top should cascade from Mid");
+    }
+
+    // ---------------------------------------------------------------
+    // Test 5: no regression in categories/severities for the basic
+    //         struct-field-type-changed scenario
+    // ---------------------------------------------------------------
+    #[test]
+    fn struct_field_type_change_severity_and_category() {
+        let old = spec_with_structs(vec![
+            ("Data", vec![("amount", ScSpecTypeDef::U32)]),
+        ]);
+        let new = spec_with_structs(vec![
+            ("Data", vec![("amount", ScSpecTypeDef::I128)]),
+        ]);
+
+        let report = compare(&old, &new);
+
+        let field_change = report.findings.iter().find(|f| {
+            f.category == "Struct Field Type Changed"
+        });
+        assert!(field_change.is_some(), "Should detect field type change");
+
+        let f = field_change.unwrap();
+        assert_eq!(f.severity, Severity::Critical);
+        assert_eq!(f.type_name.as_deref(), Some("Data"));
     }
 }
