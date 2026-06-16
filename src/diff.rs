@@ -76,6 +76,7 @@ fn compare_functions(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRe
                         "Function '{}' was removed. Existing callers will break.",
                         name
                     ),
+                    type_name: None,
                 });
             }
             Some(new_fn) => {
@@ -91,6 +92,7 @@ fn compare_functions(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRe
                 severity: Severity::Info,
                 category: "Function Added".to_string(),
                 message: format!("New function '{}' added.", name),
+                type_name: None,
             });
         }
     }
@@ -117,6 +119,7 @@ fn check_function_signature(
                 old_inputs.len(),
                 new_inputs.len()
             ),
+            type_name: None,
         });
         return; // No point comparing individual params if count differs
     }
@@ -134,6 +137,7 @@ fn check_function_signature(
                     "Function '{}': parameter {} renamed from '{}' to '{}'.",
                     name, i, old_name, new_name
                 ),
+                type_name: None,
             });
         }
 
@@ -147,6 +151,7 @@ fn check_function_signature(
                     crate::mapper::type_to_string(&old_input.type_), 
                     crate::mapper::type_to_string(&new_input.type_)
                 ),
+                type_name: None,
             });
         }
     }
@@ -165,6 +170,7 @@ fn check_function_signature(
                 old_outputs.len(),
                 new_outputs.len()
             ),
+            type_name: None,
         });
     } else {
         for (i, (old_out, new_out)) in old_outputs.iter().zip(new_outputs.iter()).enumerate() {
@@ -178,6 +184,7 @@ fn check_function_signature(
                         crate::mapper::type_to_string(old_out), 
                         crate::mapper::type_to_string(new_out)
                     ),
+                    type_name: None,
                 });
             }
         }
@@ -204,6 +211,7 @@ fn compare_structs(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRepo
                         if is_evt { "Event struct" } else { "Struct" },
                         name
                     ),
+                    type_name: Some(name.clone()),
                 });
             }
             Some(new_struct) => {
@@ -219,6 +227,7 @@ fn compare_structs(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRepo
                 severity: Severity::Info,
                 category: "Struct Added".to_string(),
                 message: format!("New struct '{}' added.", name),
+                type_name: Some(name.clone()),
             });
         }
     }
@@ -252,6 +261,7 @@ fn check_struct_fields(
                     "{} '{}': field '{}' was removed. Backwards compatibility is broken.",
                     msg_prefix, name, old_name
                 ),
+                type_name: Some(name.to_string()),
             });
         }
     }
@@ -271,6 +281,7 @@ fn check_struct_fields(
                      Positional serialization breaks layout compatibility.",
                     msg_prefix, name, i, old_name, new_name
                 ),
+                type_name: Some(name.to_string()),
             });
         }
 
@@ -285,6 +296,7 @@ fn check_struct_fields(
                     crate::mapper::type_to_string(&old_field.type_), 
                     crate::mapper::type_to_string(&new_field.type_)
                 ),
+                type_name: Some(name.to_string()),
             });
         }
     }
@@ -301,6 +313,7 @@ fn check_struct_fields(
                     name,
                     new_field.name.to_string()
                 ),
+                type_name: Some(name.to_string()),
             });
         }
     }
@@ -320,6 +333,7 @@ fn compare_enums(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport
                         if is_evt { "Event enum" } else { "Enum" },
                         name
                     ),
+                    type_name: Some(name.clone()),
                 });
             }
             Some(new_enum) => {
@@ -335,6 +349,7 @@ fn compare_enums(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport
                 severity: Severity::Info,
                 category: "Enum Added".to_string(),
                 message: format!("New enum '{}' added.", name),
+                type_name: Some(name.clone()),
             });
         }
     }
@@ -367,6 +382,7 @@ fn check_enum_cases(
                          On-chain data or events relying on this value will be invalid.",
                         msg_prefix, name, old_name, old_case.value
                     ),
+                    type_name: Some(name.to_string()),
                 });
             }
             Some(new_case) => {
@@ -380,6 +396,7 @@ fn check_enum_cases(
                              This breaks data serialization.",
                             msg_prefix, name, old_name, old_case.value, new_case.value
                         ),
+                        type_name: Some(name.to_string()),
                     });
                 }
             }
@@ -398,6 +415,7 @@ fn check_enum_cases(
                         "{} '{}': new case '{}' (value {}) added.",
                         msg_prefix, name, new_name, new_case.value
                     ),
+                    type_name: Some(name.to_string()),
                 });
             }
         }
@@ -445,6 +463,7 @@ fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
                              This breaks backwards compatibility for storage.",
                             dep, current_broken_type
                         ),
+                        type_name: Some(dep.clone()),
                     });
                 }
             }
