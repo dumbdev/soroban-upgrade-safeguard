@@ -1,6 +1,7 @@
 use crate::diff::{DiffReport, Finding, Severity};
 use colored::Colorize;
-use std::collections::HashMap;
+use serde::Serialize;
+use std::collections::{BTreeMap, HashMap};
 
 /// A structured container for aggregated comparison findings.
 pub struct SafetyReport {
@@ -10,6 +11,26 @@ pub struct SafetyReport {
     pub total_findings: usize,
     pub is_safe: bool,
     pub findings_by_category: HashMap<String, Vec<Finding>>,
+}
+
+/// Severity counts, serialized as a nested `counts` object.
+#[derive(Serialize)]
+pub struct SeverityCounts {
+    pub critical: usize,
+    pub warning: usize,
+    pub info: usize,
+}
+
+/// A machine-readable view of a [`SafetyReport`] for `--format json`.
+///
+/// Borrows from the owning report. Categories are stored in a [`BTreeMap`]
+/// so the emitted JSON has a stable, diffable key order.
+#[derive(Serialize)]
+pub struct SafetyReportJson<'a> {
+    pub is_safe: bool,
+    pub counts: SeverityCounts,
+    pub total_findings: usize,
+    pub findings_by_category: BTreeMap<&'a str, &'a Vec<Finding>>,
 }
 
 impl SafetyReport {
@@ -39,6 +60,24 @@ impl SafetyReport {
             total_findings: diff.findings.len(),
             is_safe: critical_count == 0,
             findings_by_category,
+        }
+    }
+
+    /// Build a serializable, machine-readable view of this report.
+    pub fn to_json(&self) -> SafetyReportJson<'_> {
+        SafetyReportJson {
+            is_safe: self.is_safe,
+            counts: SeverityCounts {
+                critical: self.critical_count,
+                warning: self.warning_count,
+                info: self.info_count,
+            },
+            total_findings: self.total_findings,
+            findings_by_category: self
+                .findings_by_category
+                .iter()
+                .map(|(k, v)| (k.as_str(), v))
+                .collect(),
         }
     }
 

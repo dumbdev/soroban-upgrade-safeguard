@@ -1,12 +1,14 @@
 use crate::mapper::LayoutMapper;
 use crate::spec::ContractSpec;
+use serde::Serialize;
 use stellar_xdr::curr::{
     ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeDef, ScSpecUdtEnumCaseV0, ScSpecUdtEnumV0,
     ScSpecUdtStructFieldV0, ScSpecUdtStructV0,
 };
 
 /// Severity of a detected issue.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Critical,
     Warning,
@@ -14,7 +16,7 @@ pub enum Severity {
 }
 
 /// A single finding from the comparison analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Finding {
     pub severity: Severity,
     pub category: String,
