@@ -19,6 +19,10 @@ pub struct Finding {
     pub severity: Severity,
     pub category: String,
     pub message: String,
+    /// The name of the affected UDT (struct/enum/union), if this finding
+    /// relates to a specific type.  Used by cascade-detection so it never
+    /// needs to re-parse `message`.
+    pub type_name: Option<String>,
 }
 
 /// Holds all findings from a comparison of two contract specs.
