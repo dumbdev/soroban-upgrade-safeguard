@@ -427,14 +427,13 @@ fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
     let old_mapper = LayoutMapper::new(old);
     let reverse_deps = old_mapper.build_reverse_dependencies();
     
-    // Collect all UDTs that had a critical breaking change
+    // Collect all UDTs that had a critical breaking change.
+    // We read `type_name` directly — no message-text parsing needed.
     let mut broken_types = std::collections::HashSet::new();
     for finding in &report.findings {
         if finding.severity == Severity::Critical {
-            let tokens: Vec<&str> = finding.message.split('\'').collect();
-            if tokens.len() >= 3 && (finding.message.starts_with("Struct") || finding.message.starts_with("Enum") || finding.message.starts_with("Event")) {
-                let type_name = tokens[1].to_string();
-                broken_types.insert(type_name);
+            if let Some(ref name) = finding.type_name {
+                broken_types.insert(name.clone());
             }
         }
     }
