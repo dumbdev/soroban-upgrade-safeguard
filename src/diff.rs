@@ -492,9 +492,9 @@ fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
                         severity: Severity::Critical,
                         category: "Cascading Layout Break".to_string(),
                         message: format!(
-                            "Type '{}' layout is implicitly broken safely because it contains modified type '{}'. \
-                             This breaks backwards compatibility for storage.",
-                            dep, current_broken_type
+                            "Type '{}' layout is broken because it embeds modified type '{}'. \
+                             Stored data for '{}' is no longer compatible.",
+                            dep, current_broken_type, dep
                         ),
                         type_name: Some(dep.clone()),
                     });
@@ -570,13 +570,26 @@ mod tests {
             "Expected a direct critical finding for Inner"
         );
 
-        // Outer should have a cascading break
-        let outer_cascade = report.findings.iter().any(|f| {
+        // Outer should have a cascading break with clear dependency wording
+        let outer_cascade = report.findings.iter().find(|f| {
             f.severity == Severity::Critical
                 && f.type_name.as_deref() == Some("Outer")
                 && f.category == "Cascading Layout Break"
         });
-        assert!(outer_cascade, "Expected a cascading break for Outer");
+        assert!(outer_cascade.is_some(), "Expected a cascading break for Outer");
+        let message = &outer_cascade.unwrap().message;
+        assert!(
+            !message.contains("broken safely"),
+            "Cascade message must not use contradictory 'broken safely' phrasing"
+        );
+        assert!(
+            message.contains("Type 'Outer' layout is broken because it embeds modified type 'Inner'"),
+            "Unexpected cascade message: {message}"
+        );
+        assert!(
+            message.contains("Stored data for 'Outer' is no longer compatible"),
+            "Cascade message must explain storage impact: {message}"
+        );
     }
 
     // ---------------------------------------------------------------
