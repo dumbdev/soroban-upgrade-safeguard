@@ -21,24 +21,62 @@ enum OutputFormat {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version,
+    about,
+    long_about = None,
+    // Two usage modes:
+    //   1. Local:  soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>
+    //   2. RPC:    soroban-upgrade-safeguard --contract-id <ID> --rpc-url <URL> <NEW_WASM>
+    override_usage = "soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM> [OPTIONS]\n       \
+                      soroban-upgrade-safeguard --contract-id <ID> --rpc-url <URL> <NEW_WASM> [OPTIONS]"
+)]
 struct Args {
-    /// Path to the previous (on-chain) WASM contract
-    #[arg(value_name = "OLD_WASM")]
-    old_wasm: PathBuf,
-
-    /// Path to the new (to be deployed) WASM contract
-    #[arg(value_name = "NEW_WASM")]
-    new_wasm: PathBuf,
+    /// WASM paths: <OLD_WASM> <NEW_WASM> in local mode, or just <NEW_WASM> in RPC mode
+    #[arg(value_name = "WASM", num_args = 1..=2)]
+    wasm_paths: Vec<PathBuf>,
 
     /// Output format
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     format: OutputFormat,
+
+    /// Stellar/Soroban Contract ID to fetch from on-chain (e.g. C...)
+    #[arg(long, value_name = "CONTRACT_ID", requires = "rpc_url")]
+    contract_id: Option<String>,
+
+    /// Stellar RPC URL (e.g. https://soroban-testnet.stellar.org)
+    #[arg(long, value_name = "RPC_URL", requires = "contract_id")]
+    rpc_url: Option<String>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     let json = args.format == OutputFormat::Json;
+
+    // Resolve the two usage modes:
+    //   - 2 positional args => local-vs-local comparison
+    //   - 1 positional arg  + --contract-id/--rpc-url => RPC-vs-local comparison
+    let (old_source, new_wasm_path) = match (args.wasm_paths.len(), &args.contract_id) {
+        (2, None) => (None, &args.wasm_paths[1]),          // local mode
+        (1, Some(_)) => (args.contract_id.as_deref(), &args.wasm_paths[0]), // RPC mode
+        (2, Some(_)) => {
+            anyhow::bail!(
+                "When using --contract-id, provide only the NEW_WASM path as a positional argument"
+            );
+        }
+        (1, None) => {
+            anyhow::bail!(
+                "Missing OLD_WASM path. Provide two WASM files, or use --contract-id and --rpc-url \
+                 to fetch the old contract from chain.\n\n\
+                 Usage: soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>\n       \
+                 soroban-upgrade-safeguard --contract-id <ID> --rpc-url <URL> <NEW_WASM>"
+            );
+        }
+        _ => {
+            anyhow::bail!("Expected 1 or 2 WASM path arguments");
+        }
+    };
 
     // In JSON mode, decorative progress goes to stderr so stdout stays a
     // single, pristine JSON document. In text mode it stays on stdout
@@ -59,8 +97,13 @@ fn main() -> Result<()> {
         "📦 Loading and Parsing contracts...".cyan().bold()
     ));
 
-    // Old WASM
-    let old = loader::load_wasm(&args.old_wasm)?;
+    // Old WASM — from file or from RPC
+    let old = if let Some(contract_id) = old_source {
+        let rpc_url = args.rpc_url.as_ref().unwrap();
+        loader::fetch_wasm_from_rpc(contract_id, rpc_url)?
+    } else {
+        loader::load_wasm(&args.wasm_paths[0])?
+    };
     let old_meta = parser::extract_metadata(&old.bytes)?;
     let old_spec = spec::ContractSpec::from_entries(&old_meta.spec);
     progress(format!(
@@ -72,7 +115,7 @@ fn main() -> Result<()> {
     progress(format!("     └─ {}", old_spec.summary().dimmed()));
 
     // New WASM
-    let new = loader::load_wasm(&args.new_wasm)?;
+    let new = loader::load_wasm(new_wasm_path)?;
     let new_meta = parser::extract_metadata(&new.bytes)?;
     let new_spec = spec::ContractSpec::from_entries(&new_meta.spec);
     progress(format!(
