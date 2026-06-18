@@ -3,12 +3,7 @@ use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use std::path::PathBuf;
 
-mod diff;
-mod loader;
-mod mapper;
-mod parser;
-mod report;
-mod spec;
+use soroban_upgrade_safeguard::{diff, loader, parser, report, spec};
 
 /// Output format for the safety report.
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
