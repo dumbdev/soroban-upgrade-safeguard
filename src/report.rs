@@ -136,9 +136,12 @@ impl SafetyReport {
             return output;
         }
 
-        // Sort categories to have consistent output
+        // Sort categories to have consistent output; surface Environment first.
         let mut categories: Vec<&String> = self.findings_by_category.keys().collect();
-        categories.sort();
+        categories.sort_by(|a, b| {
+            let rank = |name: &str| if name == "Environment" { 0 } else { 1 };
+            rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
+        });
 
         for category in categories {
             output.push_str(

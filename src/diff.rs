@@ -1,4 +1,5 @@
 use crate::mapper::LayoutMapper;
+use crate::parser::ContractEnvMeta;
 use crate::spec::ContractSpec;
 use serde::Serialize;
 use stellar_xdr::curr::{
@@ -68,6 +69,83 @@ pub fn compare(old: &ContractSpec, new: &ContractSpec) -> DiffReport {
     detect_cascading_layout_breaks(old, &mut report);
 
     report
+}
+
+/// Category label for contract environment metadata findings.
+pub const ENVIRONMENT_CATEGORY: &str = "Environment";
+
+/// Compare decoded environment metadata between two contract builds.
+pub fn compare_env_metadata(
+    old: Option<&ContractEnvMeta>,
+    new: Option<&ContractEnvMeta>,
+    report: &mut DiffReport,
+) {
+    match (old, new) {
+        (None, None) => {}
+        (Some(old_meta), Some(new_meta)) if old_meta == new_meta => {}
+        (old_meta, new_meta) => {
+            let severity = env_metadata_change_severity(old_meta, new_meta);
+            report.findings.push(Finding {
+                severity,
+                category: ENVIRONMENT_CATEGORY.to_string(),
+                message: format_env_metadata_change(old_meta, new_meta),
+                type_name: None,
+            });
+        }
+    }
+}
+
+fn env_metadata_change_severity(
+    old: Option<&ContractEnvMeta>,
+    new: Option<&ContractEnvMeta>,
+) -> Severity {
+    let old_protocol = old.and_then(ContractEnvMeta::protocol_version);
+    let new_protocol = new.and_then(ContractEnvMeta::protocol_version);
+
+    if old_protocol.is_some() && new_protocol.is_some() && old_protocol != new_protocol {
+        Severity::Warning
+    } else {
+        Severity::Info
+    }
+}
+
+fn format_env_metadata_change(
+    old: Option<&ContractEnvMeta>,
+    new: Option<&ContractEnvMeta>,
+) -> String {
+    match (old, new) {
+        (None, Some(new_meta)) => format!(
+            "Contract environment metadata appeared ({}).",
+            new_meta.summary()
+        ),
+        (Some(old_meta), None) => format!(
+            "Contract environment metadata was removed (was: {}).",
+            old_meta.summary()
+        ),
+        (Some(old_meta), Some(new_meta)) => {
+            if let (Some(old_proto), Some(new_proto)) =
+                (old_meta.protocol_version(), new_meta.protocol_version())
+            {
+                if old_proto != new_proto {
+                    return format!(
+                        "Soroban protocol interface version changed from {} to {} \
+                         (pre-release {} → {}).",
+                        old_proto,
+                        new_proto,
+                        old_meta.pre_release_version().unwrap_or(0),
+                        new_meta.pre_release_version().unwrap_or(0),
+                    );
+                }
+            }
+
+            format!(
+                "Contract environment metadata changed from {} to {}.",
+                old_meta.summary(),
+                new_meta.summary()
+            )
+        }
+        (None, None) => unreachable!("compare_env_metadata filters identical/absent pairs"),
+    }
 }
 
 /// Helper to detect if a User-Defined Type represents an Event by standard Soroban naming conventions.
@@ -507,7 +585,7 @@ fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stellar_xdr::curr::{ScSpecTypeUdt, StringM, VecM};
+    use stellar_xdr::curr::{ScEnvMetaEntry, ScSpecTypeUdt, StringM, VecM};
 
     /// Helper: build a minimal ContractSpec with the given structs.
     fn spec_with_structs(structs: Vec<(&str, Vec<(&str, ScSpecTypeDef)>)>) -> ContractSpec {
@@ -713,5 +791,59 @@ mod tests {
         let f = field_change.unwrap();
         assert_eq!(f.severity, Severity::Critical);
         assert_eq!(f.type_name.as_deref(), Some("Data"));
+    }
+
+    fn env_meta(protocol: u32, pre_release: u32) -> ContractEnvMeta {
+        let version = ((protocol as u64) << 32) | (pre_release as u64);
+        ContractEnvMeta {
+            entries: vec![ScEnvMetaEntry::ScEnvMetaKindInterfaceVersion(version)],
+        }
+    }
+
+    #[test]
+    fn identical_env_metadata_produces_no_finding() {
+        let meta = env_meta(21, 0);
+        let mut report = DiffReport::default();
+        compare_env_metadata(Some(&meta), Some(&meta), &mut report);
+        assert!(report.findings.is_empty());
+    }
+
+    #[test]
+    fn env_metadata_protocol_change_is_warning() {
+        let old = env_meta(21, 0);
+        let new = env_meta(22, 0);
+        let mut report = DiffReport::default();
+        compare_env_metadata(Some(&old), Some(&new), &mut report);
+
+        assert_eq!(report.findings.len(), 1);
+        let finding = &report.findings[0];
+        assert_eq!(finding.severity, Severity::Warning);
+        assert_eq!(finding.category, ENVIRONMENT_CATEGORY);
+        assert!(finding.message.contains("protocol interface version changed"));
+    }
+
+    #[test]
+    fn env_metadata_pre_release_only_change_is_info() {
+        let old = env_meta(21, 0);
+        let new = env_meta(21, 1);
+        let mut report = DiffReport::default();
+        compare_env_metadata(Some(&old), Some(&new), &mut report);
+
+        assert_eq!(report.findings.len(), 1);
+        let finding = &report.findings[0];
+        assert_eq!(finding.severity, Severity::Info);
+        assert_eq!(finding.category, ENVIRONMENT_CATEGORY);
+    }
+
+    #[test]
+    fn env_metadata_findings_do_not_affect_is_safe() {
+        let old = env_meta(21, 0);
+        let new = env_meta(22, 0);
+        let mut report = DiffReport::default();
+        compare_env_metadata(Some(&old), Some(&new), &mut report);
+
+        let safety = crate::report::SafetyReport::new(&report);
+        assert!(safety.is_safe);
+        assert_eq!(safety.critical_count, 0);
     }
 }

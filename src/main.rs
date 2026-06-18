@@ -131,7 +131,12 @@ fn main() -> Result<()> {
         "\n{}",
         "🔬 Analyzing structural compatibility...".cyan().bold()
     ));
-    let diff_report = diff::compare(&old_spec, &new_spec);
+    let mut diff_report = diff::compare(&old_spec, &new_spec);
+    diff::compare_env_metadata(
+        old_meta.env_meta.as_ref(),
+        new_meta.env_meta.as_ref(),
+        &mut diff_report,
+    );
 
     // Generate Safety Report
     let safety_report = report::SafetyReport::new(&diff_report);

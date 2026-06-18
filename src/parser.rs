@@ -1,13 +1,53 @@
 use anyhow::{Context, Result};
 use std::io::Cursor;
-use stellar_xdr::curr::{Limited, Limits, ReadXdr, ScSpecEntry};
+use stellar_xdr::curr::{Limited, Limits, ReadXdr, ScEnvMetaEntry, ScSpecEntry};
 use wasmparser::{Parser, Payload};
+
+/// Decoded contents of a contract's `contractenvmetav0` custom section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractEnvMeta {
+    pub entries: Vec<ScEnvMetaEntry>,
+}
+
+impl ContractEnvMeta {
+    /// The packed Soroban interface version, when present.
+    pub fn interface_version(&self) -> Option<u64> {
+        self.entries.iter().find_map(|entry| match entry {
+            ScEnvMetaEntry::ScEnvMetaKindInterfaceVersion(version) => Some(*version),
+        })
+    }
+
+    /// Ledger / protocol version (high 32 bits of the interface version).
+    pub fn protocol_version(&self) -> Option<u32> {
+        self.interface_version().map(|v| (v >> 32) as u32)
+    }
+
+    /// Pre-release component of the interface version (low 32 bits).
+    pub fn pre_release_version(&self) -> Option<u32> {
+        self.interface_version().map(|v| v as u32)
+    }
+
+    /// Short human-readable summary for report messages.
+    pub fn summary(&self) -> String {
+        if let Some(version) = self.interface_version() {
+            format!(
+                "protocol {}, pre-release {}",
+                version >> 32,
+                version as u32
+            )
+        } else if self.entries.is_empty() {
+            "empty".to_string()
+        } else {
+            format!("{} environment metadata entries", self.entries.len())
+        }
+    }
+}
 
 /// Represents the extracted Soroban-specific custom sections from a WASM module.
 #[derive(Debug, Default)]
 pub struct SorobanMetadata {
     pub spec: Vec<ScSpecEntry>,
-    pub env_meta: Option<Vec<u8>>,
+    pub env_meta: Option<ContractEnvMeta>,
 }
 
 /// Decodes concatenated ScSpecEntry XDR objects from raw bytes.
@@ -29,6 +69,27 @@ fn decode_spec_entries(data: &[u8]) -> Result<Vec<ScSpecEntry>> {
     Ok(entries)
 }
 
+/// Decodes concatenated ScEnvMetaEntry XDR objects from raw bytes.
+fn decode_env_meta_entries(data: &[u8]) -> Result<Vec<ScEnvMetaEntry>> {
+    let cursor = Cursor::new(data);
+    let mut limited = Limited::new(cursor, Limits::none());
+    let mut entries = Vec::new();
+
+    while (limited.inner.position() as usize) < data.len() {
+        let entry =
+            ScEnvMetaEntry::read_xdr(&mut limited).context("Failed to decode ScEnvMetaEntry XDR")?;
+        entries.push(entry);
+    }
+
+    Ok(entries)
+}
+
+/// Decodes a `contractenvmetav0` section into a comparable representation.
+pub fn decode_env_meta(data: &[u8]) -> Result<ContractEnvMeta> {
+    let entries = decode_env_meta_entries(data)?;
+    Ok(ContractEnvMeta { entries })
+}
+
 /// Parses the WASM bytes to extract Soroban-specific custom sections and decodes them.
 pub fn extract_metadata(bytes: &[u8]) -> Result<SorobanMetadata> {
     let mut metadata = SorobanMetadata::default();
@@ -43,7 +104,7 @@ pub fn extract_metadata(bytes: &[u8]) -> Result<SorobanMetadata> {
                     metadata.spec.extend(entries);
                 }
                 "contractenvmetav0" => {
-                    metadata.env_meta = Some(section.data().to_vec());
+                    metadata.env_meta = decode_env_meta(section.data()).ok();
                 }
                 _ => {}
             }
@@ -51,4 +112,51 @@ pub fn extract_metadata(bytes: &[u8]) -> Result<SorobanMetadata> {
     }
 
     Ok(metadata)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+    use stellar_xdr::curr::{ScEnvMetaEntry, WriteXdr};
+
+    fn encode_interface_version(protocol: u32, pre_release: u32) -> Vec<u8> {
+        let version = ((protocol as u64) << 32) | (pre_release as u64);
+        let entry = ScEnvMetaEntry::ScEnvMetaKindInterfaceVersion(version);
+        let cursor = Cursor::new(Vec::new());
+        let mut limited = Limited::new(cursor, Limits::none());
+        entry.write_xdr(&mut limited).unwrap();
+        limited.inner.into_inner()
+    }
+
+    #[test]
+    fn decode_env_meta_reads_interface_version() {
+        let bytes = encode_interface_version(21, 0);
+        let meta = decode_env_meta(&bytes).unwrap();
+
+        assert_eq!(meta.protocol_version(), Some(21));
+        assert_eq!(meta.pre_release_version(), Some(0));
+        assert_eq!(meta.interface_version(), Some(21 << 32));
+    }
+
+    #[test]
+    fn decode_env_meta_rejects_truncated_bytes() {
+        let bytes = encode_interface_version(21, 0);
+        assert!(decode_env_meta(&bytes[..bytes.len() - 1]).is_err());
+    }
+
+    #[test]
+    fn extract_metadata_skips_invalid_env_meta_without_error() {
+        let wasm = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/wasm/v1.wasm"),
+        )
+        .expect("v1.wasm fixture must exist");
+
+        let metadata = extract_metadata(&wasm).expect("valid wasm must parse");
+        assert!(
+            metadata.env_meta.is_some(),
+            "fixture wasm should contain decodable env metadata"
+        );
+    }
 }
