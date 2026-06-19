@@ -11,6 +11,7 @@ pub struct SafetyReport {
     pub total_findings: usize,
     pub is_safe: bool,
     pub findings_by_category: HashMap<String, Vec<Finding>>,
+    pub strict: bool,
 }
 
 /// Severity counts, serialized as a nested `counts` object.
@@ -28,6 +29,7 @@ pub struct SeverityCounts {
 #[derive(Serialize)]
 pub struct SafetyReportJson<'a> {
     pub is_safe: bool,
+    pub strict: bool,
     pub counts: SeverityCounts,
     pub total_findings: usize,
     pub findings_by_category: BTreeMap<&'a str, &'a Vec<Finding>>,
@@ -35,7 +37,7 @@ pub struct SafetyReportJson<'a> {
 
 impl SafetyReport {
     /// Compute a safety report from a raw DiffReport.
-    pub fn new(diff: &DiffReport) -> Self {
+    pub fn new(diff: &DiffReport, strict: bool) -> Self {
         let mut critical_count = 0;
         let mut warning_count = 0;
         let mut info_count = 0;
@@ -53,13 +55,20 @@ impl SafetyReport {
                 .push(finding.clone());
         }
 
+        let is_safe = if strict {
+            critical_count == 0 && warning_count == 0
+        } else {
+            critical_count == 0
+        };
+
         Self {
             critical_count,
             warning_count,
             info_count,
             total_findings: diff.findings.len(),
-            is_safe: critical_count == 0,
+            is_safe,
             findings_by_category,
+            strict,
         }
     }
 
@@ -67,6 +76,7 @@ impl SafetyReport {
     pub fn to_json(&self) -> SafetyReportJson<'_> {
         SafetyReportJson {
             is_safe: self.is_safe,
+            strict: self.strict,
             counts: SeverityCounts {
                 critical: self.critical_count,
                 warning: self.warning_count,
@@ -95,6 +105,14 @@ impl SafetyReport {
                 .cyan()
                 .to_string(),
         );
+        if self.strict {
+            output.push_str(
+                &"    [STRICT MODE ACTIVE]\n"
+                    .bold()
+                    .yellow()
+                    .to_string(),
+            );
+        }
         output.push_str(
             &"========================================\n"
                 .bold()
@@ -103,6 +121,10 @@ impl SafetyReport {
 
         let status = if self.is_safe {
             "✅ PASSED (No breaking changes detected)".green().bold()
+        } else if self.strict && self.critical_count == 0 {
+            "❌ FAILED (Warnings detected in strict mode)"
+                .red()
+                .bold()
         } else {
             "❌ FAILED (Critical breaking changes detected)"
                 .red()
@@ -160,8 +182,13 @@ impl SafetyReport {
         }
 
         if !self.is_safe {
-            output.push_str(&"⚠️  ACTION REQUIRED: The new contract version modifies existing storage layouts or function interfaces.\n".red().bold().to_string());
-            output.push_str(&"Deploying this upgrade will result in orphaned data, serialization panics, or broken integrations.\n".red().to_string());
+            if self.strict && self.critical_count == 0 {
+                output.push_str(&"⚠️  ACTION REQUIRED: Strict mode is active and warnings were detected.\n".yellow().bold().to_string());
+                output.push_str(&"These warnings must be resolved or strict mode disabled to proceed.\n".yellow().to_string());
+            } else {
+                output.push_str(&"⚠️  ACTION REQUIRED: The new contract version modifies existing storage layouts or function interfaces.\n".red().bold().to_string());
+                output.push_str(&"Deploying this upgrade will result in orphaned data, serialization panics, or broken integrations.\n".red().to_string());
+            }
         }
 
         output

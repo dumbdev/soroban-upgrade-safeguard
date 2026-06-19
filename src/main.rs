@@ -48,6 +48,10 @@ struct Args {
     /// Stellar RPC URL (e.g. https://soroban-testnet.stellar.org)
     #[arg(long, value_name = "RPC_URL", requires = "contract_id")]
     rpc_url: Option<String>,
+
+    /// Exit with a non-zero code if any Warnings or Critical findings are found
+    #[arg(long)]
+    strict: bool,
 }
 
 fn main() -> Result<()> {
@@ -134,7 +138,7 @@ fn main() -> Result<()> {
     let diff_report = diff::compare(&old_spec, &new_spec);
 
     // Generate Safety Report
-    let safety_report = report::SafetyReport::new(&diff_report);
+    let safety_report = report::SafetyReport::new(&diff_report, args.strict);
 
     if json {
         // Single JSON document to stdout; no decorative text, no ANSI codes.
