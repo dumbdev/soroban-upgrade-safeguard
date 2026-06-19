@@ -186,6 +186,25 @@ fn compare_functions(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRe
             }
             Some(new_fn) => {
                 check_function_signature(name, old_fn, new_fn, report);
+                // Compare function doc-strings and emit informational findings
+                if old_fn.doc != new_fn.doc {
+                    let old_doc_empty = old_fn.doc.to_string().is_empty();
+                    let new_doc_empty = new_fn.doc.to_string().is_empty();
+                    let message = if old_doc_empty && !new_doc_empty {
+                        format!("Function '{}' documentation was added.", name)
+                    } else if !old_doc_empty && new_doc_empty {
+                        format!("Function '{}' documentation was removed.", name)
+                    } else {
+                        format!("Function '{}' documentation changed.", name)
+                    };
+
+                    report.findings.push(Finding {
+                        severity: Severity::Info,
+                        category: "Function Documentation Changed".to_string(),
+                        message,
+                        type_name: None,
+                    });
+                }
             }
         }
     }
@@ -335,6 +354,25 @@ fn compare_structs(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRepo
             }
             Some(new_struct) => {
                 check_struct_fields(name, old_struct, new_struct, report);
+                // Compare struct doc-strings (informational only)
+                if old_struct.doc != new_struct.doc {
+                    let old_doc_empty = old_struct.doc.to_string().is_empty();
+                    let new_doc_empty = new_struct.doc.to_string().is_empty();
+                    let message = if old_doc_empty && !new_doc_empty {
+                        format!("Struct '{}' documentation was added.", name)
+                    } else if !old_doc_empty && new_doc_empty {
+                        format!("Struct '{}' documentation was removed.", name)
+                    } else {
+                        format!("Struct '{}' documentation changed.", name)
+                    };
+
+                    report.findings.push(Finding {
+                        severity: Severity::Info,
+                        category: "Struct Documentation Changed".to_string(),
+                        message,
+                        type_name: Some(name.clone()),
+                    });
+                }
             }
         }
     }
@@ -474,6 +512,25 @@ fn compare_enums(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport
             }
             Some(new_enum) => {
                 check_enum_cases(name, old_enum, new_enum, report);
+                // Compare enum doc-strings (informational only)
+                if old_enum.doc != new_enum.doc {
+                    let old_doc_empty = old_enum.doc.to_string().is_empty();
+                    let new_doc_empty = new_enum.doc.to_string().is_empty();
+                    let message = if old_doc_empty && !new_doc_empty {
+                        format!("Enum '{}' documentation was added.", name)
+                    } else if !old_doc_empty && new_doc_empty {
+                        format!("Enum '{}' documentation was removed.", name)
+                    } else {
+                        format!("Enum '{}' documentation changed.", name)
+                    };
+
+                    report.findings.push(Finding {
+                        severity: Severity::Info,
+                        category: "Enum Documentation Changed".to_string(),
+                        message,
+                        type_name: Some(name.clone()),
+                    });
+                }
             }
         }
     }
@@ -868,6 +925,44 @@ mod tests {
         ContractEnvMeta {
             entries: vec![ScEnvMetaEntry::ScEnvMetaKindInterfaceVersion(version)],
         }
+    }
+
+    #[test]
+    fn struct_doc_change_produces_info() {
+        let mut old = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+        let mut new = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+
+        // Set differing docs
+        old.structs.get_mut("Data").unwrap().doc = "old doc".try_into().unwrap();
+        new.structs.get_mut("Data").unwrap().doc = "new doc".try_into().unwrap();
+
+        let report = compare(&old, &new);
+
+        let found = report.findings.iter().any(|f| {
+            f.severity == Severity::Info
+                && f.category == "Struct Documentation Changed"
+                && f.type_name.as_deref() == Some("Data")
+        });
+        assert!(found, "Expected an info finding for struct doc change");
+
+        // Ensure info findings do not influence safety
+        let safety = crate::report::SafetyReport::new(&report);
+        assert!(safety.is_safe);
+        assert_eq!(safety.critical_count, 0);
+    }
+
+    #[test]
+    fn identical_struct_docs_produce_no_finding() {
+        let mut old = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+        let mut new = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+
+        // Same doc text
+        old.structs.get_mut("Data").unwrap().doc = "doc".try_into().unwrap();
+        new.structs.get_mut("Data").unwrap().doc = "doc".try_into().unwrap();
+
+        let report = compare(&old, &new);
+        // No findings expected
+        assert!(report.findings.is_empty(), "Expected no findings when docs identical");
     }
 
     #[test]
